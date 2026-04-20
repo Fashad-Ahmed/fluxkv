@@ -1,0 +1,57 @@
+name: Auto Create PR on First Branch Push
+
+on:
+  push:
+    branches:
+      - "**"
+
+permissions:
+  contents: read
+  pull-requests: write
+
+jobs:
+  create-pr:
+    if: github.ref_type == 'branch' && github.ref_name != 'main' && github.ref_name != 'master'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Create PR if one does not exist
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const owner = context.repo.owner;
+            const repo = context.repo.repo;
+            const head = `${owner}:${context.ref.replace('refs/heads/', '')}`;
+            const base = context.payload.repository.default_branch || 'main';
+
+            const existing = await github.rest.pulls.list({
+              owner,
+              repo,
+              state: 'all',
+              head,
+              base,
+            });
+
+            if (existing.data.length > 0) {
+              core.info(`A PR already exists for ${head} -> ${base}: #${existing.data[0].number}`);
+              return;
+            }
+
+            const branchName = context.ref.replace('refs/heads/', '');
+            const title = `Auto PR: ${branchName}`;
+            const body = [
+              'This PR was automatically created on first push of this branch.',
+              '',
+              '## Summary',
+              '- Initial changes from this branch',
+            ].join('\n');
+
+            const pr = await github.rest.pulls.create({
+              owner,
+              repo,
+              title,
+              head: branchName,
+              base,
+              body,
+            });
+
+            core.info(`Created PR #${pr.data.number}: ${pr.data.html_url}`);
