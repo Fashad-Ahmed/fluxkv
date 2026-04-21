@@ -6,10 +6,12 @@ import (
 	"log"
 	"net"
 	"strings"
+	"os"
 
 	"github.com/Fashad-Ahmed/fluxkv/internal/aof"
 	"github.com/Fashad-Ahmed/fluxkv/internal/resp"
 	"github.com/Fashad-Ahmed/fluxkv/internal/store"
+	"github.com/Fashad-Ahmed/fluxkv/internal/replication"
 )
 
 func main() {
@@ -18,6 +20,7 @@ func main() {
 	flag.Parse()
 
 	kv := store.NewMemoryStore()
+	replManager := replication.NewManager()
 
 	// Use the dynamic port for the AOF file so the Leader and Follower 
 	// don't try to write to the exact same file!
@@ -57,10 +60,11 @@ func main() {
 			log.Printf("Error accepting connection: %v\n", err)
 			continue
 		}
-		go handleConnection(conn, kv, aofStore)
+		go handleConnection(conn, kv, aofStore, replManager)
 	}
 }
-func handleConnection(conn net.Conn, kv *store.MemoryStore, aof *aof.Aof) {
+
+func handleConnection(conn net.Conn, kv *store.MemoryStore, aofStore *aof.Aof, repl *replication.Manager) {
 	defer conn.Close()
 	r := resp.NewResp(conn)
 
@@ -68,7 +72,7 @@ func handleConnection(conn net.Conn, kv *store.MemoryStore, aof *aof.Aof) {
 		value, err := r.Read()
 		if err != nil {
 			if err.Error() != "EOF" {
-				fmt.Printf("Connection error: %s\n", err.Error())
+				// Suppress EOF errors from normal disconnects to keep logs clean
 			}
 			return
 		}
@@ -83,21 +87,39 @@ func handleConnection(conn net.Conn, kv *store.MemoryStore, aof *aof.Aof) {
 		switch command {
 		case "PING":
 			conn.Write([]byte("+PONG\r\n"))
+
+		case "SYNC":
+			// Read the Leader's entire existing database file
+			aofFile := fmt.Sprintf("database_%s.aof", *port)
+			historicalData, err := os.ReadFile(aofFile)
 			
+			// Stream the entire history to the Follower instantly
+			if err == nil {
+				conn.Write(historicalData)
+			}
+
+			// Register the follower to receive all FUTURE commands
+			repl.AddFollower(conn)
+			
+			// Keep the connection open
+			buf := make([]byte, 1)
+			conn.Read(buf) 
+			return
+
 		case "SET":
 			if len(args) != 2 {
 				conn.Write([]byte("-ERR wrong number of arguments for 'set' command\r\n"))
 				continue
 			}
 			
-			// Save to memory
 			kv.Set(args[0].Str, args[1].Str)
 			
-			// Append the exact command to the AOF log
-			aof.Write(value)
+			aofStore.Write(value)
+			
+			repl.Broadcast(value.Marshal())
 			
 			conn.Write([]byte("+OK\r\n"))
-			
+
 		case "GET":
 			if len(args) != 1 {
 				conn.Write([]byte("-ERR wrong number of arguments for 'get' command\r\n"))
@@ -109,7 +131,7 @@ func handleConnection(conn net.Conn, kv *store.MemoryStore, aof *aof.Aof) {
 			} else {
 				conn.Write([]byte(fmt.Sprintf("$%d\r\n%s\r\n", len(val), val)))
 			}
-			
+
 		default:
 			conn.Write([]byte(fmt.Sprintf("-ERR unknown command '%s'\r\n", command)))
 		}
