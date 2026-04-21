@@ -19,7 +19,8 @@ jobs:
 
       - name: Create PR if one does not exist
         env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_TOKEN: ${{ secrets.AUTO_PR_TOKEN != '' && secrets.AUTO_PR_TOKEN || secrets.GITHUB_TOKEN }}
+          HAS_AUTO_PR_TOKEN: ${{ secrets.AUTO_PR_TOKEN != '' }}
         run: |
           BRANCH_NAME="${{ github.ref_name }}"
           BASE_BRANCH="${{ github.event.repository.default_branch || 'main' }}"
@@ -44,8 +45,17 @@ jobs:
           EOF
           )"
 
-          gh pr create \
+          if gh pr create \
             --title "Auto PR: $BRANCH_NAME" \
             --body "$PR_BODY" \
             --base "$BASE_BRANCH" \
-            --head "$BRANCH_NAME"
+            --head "$BRANCH_NAME"; then
+            echo "PR created successfully."
+          else
+            if [ "$HAS_AUTO_PR_TOKEN" != "true" ]; then
+              echo "PR creation failed with GITHUB_TOKEN."
+              echo "Either enable 'Allow GitHub Actions to create and approve pull requests' in repository Actions settings,"
+              echo "or add a classic/fine-grained PAT as repository secret AUTO_PR_TOKEN (with pull request write access)."
+            fi
+            exit 1
+          fi
