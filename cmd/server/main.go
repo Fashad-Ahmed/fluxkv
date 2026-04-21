@@ -6,13 +6,31 @@ import (
 	"net"
 	"strings"
 
+	"github.com/Fashad-Ahmed/fluxkv/internal/aof"
 	"github.com/Fashad-Ahmed/fluxkv/internal/resp"
 	"github.com/Fashad-Ahmed/fluxkv/internal/store"
 )
 
 func main() {
-	// Initialize our thread-safe memory store
 	kv := store.NewMemoryStore()
+
+	// Initialize AOF
+	aof, err := aof.NewAof("database.aof")
+	if err != nil {
+		log.Fatalf("Failed to open AOF file: %v", err)
+	}
+	defer aof.Close()
+
+	// Replay AOF on startup
+	fmt.Println("Reading AOF file to restore state...")
+	aof.Read(func(value resp.Value) {
+		command := strings.ToUpper(value.Array[0].Str)
+		args := value.Array[1:]
+
+		if command == "SET" && len(args) == 2 {
+			kv.Set(args[0].Str, args[1].Str)
+		}
+	})
 
 	listener, err := net.Listen("tcp", ":6379")
 	if err != nil {
@@ -29,11 +47,12 @@ func main() {
 			continue
 		}
 
-		go handleConnection(conn, kv)
+		// Pass BOTH the store and the AOF to the handler
+		go handleConnection(conn, kv, aof)
 	}
 }
 
-func handleConnection(conn net.Conn, kv *store.MemoryStore) {
+func handleConnection(conn net.Conn, kv *store.MemoryStore, aof *aof.Aof) {
 	defer conn.Close()
 	r := resp.NewResp(conn)
 
@@ -46,12 +65,10 @@ func handleConnection(conn net.Conn, kv *store.MemoryStore) {
 			return
 		}
 
-		// Redis commands are sent as arrays of bulk strings
 		if value.Typ != "array" || len(value.Array) == 0 {
 			continue
 		}
 
-		// Extract the command (e.g., "SET", "GET") and its arguments
 		command := strings.ToUpper(value.Array[0].Str)
 		args := value.Array[1:]
 
@@ -64,8 +81,13 @@ func handleConnection(conn net.Conn, kv *store.MemoryStore) {
 				conn.Write([]byte("-ERR wrong number of arguments for 'set' command\r\n"))
 				continue
 			}
-			// Save to our memory map
+			
+			// Save to memory
 			kv.Set(args[0].Str, args[1].Str)
+			
+			// Append the exact command to the AOF log
+			aof.Write(value)
+			
 			conn.Write([]byte("+OK\r\n"))
 			
 		case "GET":
@@ -73,16 +95,11 @@ func handleConnection(conn net.Conn, kv *store.MemoryStore) {
 				conn.Write([]byte("-ERR wrong number of arguments for 'get' command\r\n"))
 				continue
 			}
-			
-			// Retrieve from our memory map
 			val, exists := kv.Get(args[0].Str)
 			if !exists {
-				// RESP standard for "Null" or "Not Found"
 				conn.Write([]byte("$-1\r\n"))
 			} else {
-				// RESP standard for a returned Bulk String
-				response := fmt.Sprintf("$%d\r\n%s\r\n", len(val), val)
-				conn.Write([]byte(response))
+				conn.Write([]byte(fmt.Sprintf("$%d\r\n%s\r\n", len(val), val)))
 			}
 			
 		default:
