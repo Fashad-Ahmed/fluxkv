@@ -10,6 +10,7 @@ import (
 	"github.com/Fashad-Ahmed/fluxkv/internal/aof"
 	"github.com/Fashad-Ahmed/fluxkv/internal/resp"
 	"github.com/Fashad-Ahmed/fluxkv/internal/store"
+	"github.com/Fashad-Ahmed/fluxkv/internal/replication"
 )
 
 func main() {
