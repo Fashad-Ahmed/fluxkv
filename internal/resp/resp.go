@@ -130,3 +130,25 @@ func (r *Resp) readBulk() (Value, error) {
 
 	return v, nil
 }
+
+func (v Value) Marshal() []byte {
+	switch v.Typ {
+	case "array":
+		res := []byte(fmt.Sprintf("*%d\r\n", len(v.Array)))
+		for _, val := range v.Array {
+			res = append(res, val.Marshal()...)
+		}
+		return res
+	case "bulk":
+		res := []byte(fmt.Sprintf("$%d\r\n%s\r\n", len(v.Str), v.Str))
+		return res
+	case "string":
+		res := []byte(fmt.Sprintf("+%s\r\n", v.Str))
+		return res
+	case "error":
+		res := []byte(fmt.Sprintf("-%s\r\n", v.Str))
+		return res
+	default:
+		return []byte{}
+	}
+}
