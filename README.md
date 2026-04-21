@@ -15,9 +15,9 @@ FluxKV is designed to be a lightweight, Redis-like in-memory database. It implem
 
 - [x] **Phase 1:** TCP Server & Connection multiplexing
 - [x] **Phase 2:** Custom RESP Parser (`BULK`, `ARRAY`, `STRING`)
-- [ ] **Phase 3:** Thread-safe In-Memory Store (`SET`, `GET`, `DEL`)
-- [ ] **Phase 4:** Durability via Append-Only File (AOF) persistence
-- [ ] **Phase 5:** Distributed Consensus & Replication (Clustering)
+- [x] **Phase 3:** Thread-safe In-Memory Store (`SET`, `GET`, `DEL`)
+- [x] **Phase 4:** Durability via Append-Only File (AOF) persistence
+- [x] **Phase 5:** Distributed Consensus & Replication (Clustering)
 
 ## 🛠️ Architecture
 

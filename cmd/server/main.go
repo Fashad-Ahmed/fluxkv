@@ -6,6 +6,7 @@ import (
 	"log"
 	"net"
 	"strings"
+	"os"
 
 	"github.com/Fashad-Ahmed/fluxkv/internal/aof"
 	"github.com/Fashad-Ahmed/fluxkv/internal/resp"
@@ -88,12 +89,21 @@ func handleConnection(conn net.Conn, kv *store.MemoryStore, aofStore *aof.Aof, r
 			conn.Write([]byte("+PONG\r\n"))
 
 		case "SYNC":
+			// Read the Leader's entire existing database file
+			aofFile := fmt.Sprintf("database_%s.aof", *port)
+			historicalData, err := os.ReadFile(aofFile)
+			
+			// Stream the entire history to the Follower instantly
+			if err == nil {
+				conn.Write(historicalData)
+			}
+
+			// Register the follower to receive all FUTURE commands
 			repl.AddFollower(conn)
 			
-			// We DO NOT want to return or break here, because that would close the connection
-			// Instead, we just wait/block until the follower disconnects.
+			// Keep the connection open
 			buf := make([]byte, 1)
-			conn.Read(buf)
+			conn.Read(buf) 
 			return
 
 		case "SET":
